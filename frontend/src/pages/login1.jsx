@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { LogIn, Loader2, AlertCircle } from 'lucide-react';
 
-const Login = () => {
+const Login1 = () => {
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -167,4 +167,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default Login1;
