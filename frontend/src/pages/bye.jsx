@@ -1,206 +1,288 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { apiService } from '../services/api';
-import { PlusCircle, Folder, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
+import { UserPlus, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 
-export default function Projects() {
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
+const Register = () => {
+  const [formData, setFormData] = useState({
+    email: '',
+    username: '',
+    password: '',
+    confirmPassword: '',
+    full_name: '',
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  
+  const { register, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
+  // Redirect to dashboard if already authenticated
   useEffect(() => {
-    fetchProjects();
-  }, [statusFilter]);
+    if (isAuthenticated && !success) {
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate, success]);
 
-  const fetchProjects = async () => {
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    // Clear error when user types
+    if (error) setError('');
+  };
+
+  const validateForm = () => {
+    // Check required fields
+    if (!formData.email || !formData.username || !formData.password || !formData.full_name) {
+      setError('Vui lòng nhập đầy đủ thông tin');
+      return false;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setError('Email không hợp lệ');
+      return false;
+    }
+
+    // Validate username length
+    if (formData.username.length < 3) {
+      setError('Tên đăng nhập phải có ít nhất 3 ký tự');
+      return false;
+    }
+
+    // Validate password length
+    if (formData.password.length < 6) {
+      setError('Mật khẩu phải có ít nhất 6 ký tự');
+      return false;
+    }
+
+    // Check password confirmation
+    if (formData.password !== formData.confirmPassword) {
+      setError('Mật khẩu xác nhận không khớp');
+      return false;
+    }
+
+    // Validate full name length
+    if (formData.full_name.length < 2) {
+      setError('Họ tên phải có ít nhất 2 ký tự');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateForm()) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    setSuccess(false);
+
     try {
-      setLoading(true);
-      const params = statusFilter ? { status: statusFilter } : {};
-      const response = await apiService.getProjects(params);
-      setProjects(response.data.projects || []);
-      setError(null);
+      const { confirmPassword, ...userData } = formData;
+      const result = await register(userData);
+      
+      if (result.success) {
+        setSuccess(true);
+        // Redirect will happen automatically via useEffect when isAuthenticated changes
+        setTimeout(() => {
+          navigate('/dashboard');
+        }, 1500);
+      } else {
+        setError(result.error || 'Đăng ký thất bại');
+      }
     } catch (err) {
-      setError('Không thể tải danh sách dự án. Vui lòng thử lại.');
-      console.error('Error fetching projects:', err);
+      setError('Có lỗi xảy ra. Vui lòng thử lại sau.');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      active: 'bg-green-100 text-green-800',
-      completed: 'bg-blue-100 text-blue-800',
-      on_hold: 'bg-yellow-100 text-yellow-800',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  };
-
-  const getStatusLabel = (status) => {
-    const labels = {
-      active: 'Đang thực hiện',
-      completed: 'Hoàn thành',
-      on_hold: 'Tạm dừng',
-    };
-    return labels[status] || status;
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-600">Đang tải...</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Quản lý Dự án</h1>
-          <p className="text-gray-600 mt-1">Danh sách tất cả dự án của bạn</p>
-        </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <PlusCircle size={20} />
-          Tạo dự án mới
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div className="mb-6 flex gap-4">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">Tất cả trạng thái</option>
-          <option value="active">Đang thực hiện</option>
-          <option value="completed">Hoàn thành</option>
-          <option value="on_hold">Tạm dừng</option>
-        </select>
-      </div>
-
-      {/* Error Message */}
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* Projects Grid */}
-      {projects.length === 0 ? (
-        <div className="text-center py-12">
-          <Folder className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">Chưa có dự án nào</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Bắt đầu bằng cách tạo một dự án mới.
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4 py-12">
+      <div className="w-full max-w-md">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4">
+            <UserPlus className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Đăng ký tài khoản
+          </h1>
+          <p className="text-gray-600">
+            Tạo tài khoản mới để sử dụng hệ thống
           </p>
-          <div className="mt-6">
+        </div>
+
+        {/* Register Form */}
+        <div className="bg-white rounded-lg shadow-xl p-8">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Success Message */}
+            {success && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm text-green-800 font-medium">Đăng ký thành công!</p>
+                  <p className="text-sm text-green-700 mt-1">Đang chuyển hướng đến trang chủ...</p>
+                </div>
+              </div>
+            )}
+
+            {/* Error Message */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm text-red-800 font-medium">Lỗi đăng ký</p>
+                  <p className="text-sm text-red-700 mt-1">{error}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Full Name Field */}
+            <div>
+              <label htmlFor="full_name" className="block text-sm font-medium text-gray-700 mb-2">
+                Họ và tên <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                id="full_name"
+                name="full_name"
+                value={formData.full_name}
+                onChange={handleChange}
+                placeholder="Nguyễn Văn A"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 outline-none"
+                disabled={isLoading || success}
+                autoFocus
+              />
+            </div>
+
+            {/* Email Field */}
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                Email <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="email"
+                id="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="email@example.com"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 outline-none"
+                disabled={isLoading || success}
+              />
+            </div>
+
+            {/* Username Field */}
+            <div>
+              <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-2">
+                Tên đăng nhập <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                id="username"
+                name="username"
+                value={formData.username}
+                onChange={handleChange}
+                placeholder="nguyenvana"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 outline-none"
+                disabled={isLoading || success}
+              />
+              <p className="mt-1 text-xs text-gray-500">Tối thiểu 3 ký tự</p>
+            </div>
+
+            {/* Password Field */}
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                Mật khẩu <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                value={formData.password}
+                onChange={handleChange}
+                placeholder="Nhập mật khẩu"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 outline-none"
+                disabled={isLoading || success}
+              />
+              <p className="mt-1 text-xs text-gray-500">Tối thiểu 6 ký tự</p>
+            </div>
+
+            {/* Confirm Password Field */}
+            <div>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
+                Xác nhận mật khẩu <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                id="confirmPassword"
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                placeholder="Nhập lại mật khẩu"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 outline-none"
+                disabled={isLoading || success}
+              />
+            </div>
+
+            {/* Submit Button */}
             <button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+              type="submit"
+              disabled={isLoading || success}
+              className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition duration-200 flex items-center justify-center gap-2 mt-6"
             >
-              <PlusCircle className="-ml-1 mr-2 h-5 w-5" />
-              Tạo dự án mới
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Đang xử lý...</span>
+                </>
+              ) : success ? (
+                <>
+                  <CheckCircle className="w-5 h-5" />
+                  <span>Đăng ký thành công</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="w-5 h-5" />
+                  <span>Đăng ký</span>
+                </>
+              )}
             </button>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map((project) => (
-            <Link
-              key={project.id}
-              to={`/projects/${project.id}`}
-              className="block bg-white border rounded-lg hover:shadow-lg transition-shadow p-6"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center">
-                  <Folder className="h-8 w-8 text-blue-600" />
-                </div>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(project.status)}`}>
-                  {getStatusLabel(project.status)}
-                </span>
-              </div>
+          </form>
 
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">{project.name}</h3>
-              
-              {project.description && (
-                <p className="text-sm text-gray-600 mb-4 line-clamp-2">{project.description}</p>
-              )}
-
-              <div className="space-y-2">
-                <div className="flex items-center text-sm text-gray-500">
-                  <Calendar size={16} className="mr-2" />
-                  {project.start_date && project.end_date ? (
-                    <span>
-                      {new Date(project.start_date).toLocaleDateString('vi-VN')} -{' '}
-                      {new Date(project.end_date).toLocaleDateString('vi-VN')}
-                    </span>
-                  ) : (
-                    <span>Chưa xác định</span>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500">
-                    Tasks: {project.completed_tasks}/{project.total_tasks}
-                  </span>
-                  {project.total_tasks > 0 && (
-                    <span className="font-medium text-blue-600">
-                      {Math.round((project.completed_tasks / project.total_tasks) * 100)}%
-                    </span>
-                  )}
-                </div>
-
-                {project.total_tasks > 0 && (
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full"
-                      style={{
-                        width: `${(project.completed_tasks / project.total_tasks) * 100}%`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {project.owner_name && (
-                <div className="mt-4 pt-4 border-t text-sm text-gray-500">
-                  Quản lý: {project.owner_name}
-                </div>
-              )}
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* Create Project Modal - Simple version */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">Tạo dự án mới</h3>
-            <p className="text-gray-600 mb-4">
-              Form tạo dự án sẽ được triển khai chi tiết sau.
+          {/* Login Link */}
+          <div className="mt-6 text-center">
+            <p className="text-sm text-gray-600">
+              Đã có tài khoản?{' '}
+              <Link 
+                to="/login" 
+                className="text-blue-600 hover:text-blue-700 font-medium hover:underline"
+              >
+                Đăng nhập ngay
+              </Link>
             </p>
-            <button
-              onClick={() => setShowCreateModal(false)}
-              className="w-full px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
-            >
-              Đóng
-            </button>
           </div>
         </div>
-      )}
+
+        {/* Footer */}
+        <div className="mt-8 text-center text-sm text-gray-600">
+          <p>AI Deadline Forecasting Agent</p>
+          <p className="mt-1">© 2024 - Hệ thống dự báo deadline thông minh</p>
+        </div>
+      </div>
     </div>
   );
-}
+};
 
-
-//bye bye ca nha nha
-
+export default Register;
