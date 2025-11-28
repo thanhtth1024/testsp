@@ -1,0 +1,258 @@
+{
+  "name": "Flow 1 - Quick Progress Forecast",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Cron Trigger (Every 1 minute)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/projects",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "HTTP: Get Projects",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/tasks",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "HTTP: Get Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare prompt for Gemini AI\nconst tasks = $input.all();\nconst taskData = [];\n\nfor (const task of tasks) {\n  const t = task.json;\n  taskData.push({\n    id: t.id,\n    name: t.name,\n    progress: t.progress || 0,\n    deadline: t.deadline,\n    status: t.status,\n    priority: t.priority\n  });\n}\n\nif (taskData.length === 0) {\n  return [];\n}\n\nconst prompt = `Bạn là chuyên gia quản lý dự án. Phân tích các task sau và dự đoán nguy cơ trễ deadline:\n\n${JSON.stringify(taskData, null, 2)}\n\nVới mỗi task, đánh giá:\n- risk_level: \"low\", \"medium\", \"high\", hoặc \"critical\"\n- risk_percentage: 0-100 (số thực)\n- predicted_delay_days: số ngày dự đoán trễ (0 nếu không trễ)\n- analysis: phân tích ngắn gọn bằng tiếng Việt\n- recommendations: khuyến nghị cụ thể bằng tiếng Việt\n\nTrả về CHÍNH XÁC định dạng JSON array sau:\n[\n  {\n    \"task_id\": 1,\n    \"risk_level\": \"high\",\n    \"risk_percentage\": 75.5,\n    \"predicted_delay_days\": 3,\n    \"analysis\": \"Task đang ở 60% sau 80% thời gian\",\n    \"recommendations\": \"Cần bổ sung nhân lực\"\n  }\n]`;\n\nreturn {\n  json: {\n    prompt: prompt,\n    taskData: taskData\n  }\n};"
+      },
+      "name": "Function: Prepare AI Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={{$env.GEMINI_API_KEY}}",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "contents",
+              "value": "=[{\"parts\":[{\"text\":\"{{$json.prompt}}\"}]}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse AI response and extract JSON\nconst response = $input.first().json;\nlet results = [];\n\ntry {\n  const text = response.candidates[0].content.parts[0].text;\n  \n  // Try to extract JSON from response\n  const jsonMatch = text.match(/\\[.*\\]/s);\n  if (jsonMatch) {\n    results = JSON.parse(jsonMatch[0]);\n  }\n} catch (error) {\n  console.log('Error parsing AI response:', error);\n  // Return empty array if parsing fails\n  return [];\n}\n\n// Return each result as separate item for next node\nreturn results.map(r => ({ json: r }));"
+      },
+      "name": "Function: Parse AI Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/webhooks/n8n/forecast-complete",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "task_id",
+              "value": "={{$json.task_id}}"
+            },
+            {
+              "name": "risk_level",
+              "value": "={{$json.risk_level}}"
+            },
+            {
+              "name": "risk_percentage",
+              "value": "={{$json.risk_percentage}}"
+            },
+            {
+              "name": "predicted_delay_days",
+              "value": "={{$json.predicted_delay_days}}"
+            },
+            {
+              "name": "ai_analysis",
+              "value": "={{$json.analysis}}"
+            },
+            {
+              "name": "recommendations",
+              "value": "={{$json.recommendations}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Save Forecast",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.risk_percentage}}",
+              "operation": "larger",
+              "value2": 70
+            }
+          ]
+        }
+      },
+      "name": "IF: High Risk Detected",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.EMAIL_FROM}}",
+        "toEmail": "={{$env.ADMIN_EMAIL}}",
+        "subject": "⚠️ Cảnh báo: Task có nguy cơ trễ cao",
+        "emailType": "html",
+        "message": "=<h2>Cảnh báo nguy cơ trễ deadline</h2>\n<p><strong>Task ID:</strong> {{$json.task_id}}</p>\n<p><strong>Risk Level:</strong> {{$json.risk_level}}</p>\n<p><strong>Risk Percentage:</strong> {{$json.risk_percentage}}%</p>\n<p><strong>Predicted Delay:</strong> {{$json.predicted_delay_days}} ngày</p>\n<br>\n<p><strong>Phân tích:</strong></p>\n<p>{{$json.analysis}}</p>\n<br>\n<p><strong>Khuyến nghị:</strong></p>\n<p>{{$json.recommendations}}</p>",
+        "options": {}
+      },
+      "name": "Send Email: Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [2000, 200],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron Trigger (Every 1 minute)": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get Projects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Projects": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Tasks": {
+      "main": [
+        [
+          {
+            "node": "Function: Prepare AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Prepare AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Function: Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Save Forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Save Forecast": {
+      "main": [
+        [
+          {
+            "node": "IF: High Risk Detected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: High Risk Detected": {
+      "main": [
+        [
+          {
+            "node": "Send Email: Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1",
+  "id": "1",
+  "meta": {
+    "instanceId": "ai_deadline_n8n"
+  },
+  "tags": []
+}

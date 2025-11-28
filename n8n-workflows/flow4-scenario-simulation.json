@@ -1,0 +1,218 @@
+{
+  "name": "Flow 4 - Scenario Simulation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "n8n/simulate",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "simulate-webhook"
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/projects/{{$json.body.project_id}}",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "HTTP: Get Project Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/tasks?project_id={{$node['Webhook Trigger'].json.body.project_id}}",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "HTTP: Get Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build AI prompt for scenario simulation\nconst project = $node['HTTP: Get Project Data'].json;\nconst tasks = $input.first().json.tasks || [];\nconst scenario = $node['Webhook Trigger'].json.body.scenario;\n\nconst taskData = tasks.map(t => ({\n  id: t.id,\n  name: t.name,\n  progress: t.progress || 0,\n  deadline: t.deadline,\n  status: t.status,\n  priority: t.priority\n}));\n\nconst prompt = `Dự án hiện tại:\nTên: ${project.name}\nTasks:\n${JSON.stringify(taskData, null, 2)}\n\nKịch bản giả định: \"${scenario}\"\n\nPhân tích bằng tiếng Việt:\n1. Tasks nào bị ảnh hưởng? (liệt kê ID)\n2. Dự án sẽ trễ bao nhiêu ngày?\n3. Phân tích tác động chi tiết\n4. Khuyến nghị giải pháp cụ thể\n\nTrả về JSON format:\n{\n  \"affected_task_ids\": [1, 3, 5],\n  \"total_delay_days\": 7,\n  \"analysis\": \"Chi tiết phân tích bằng tiếng Việt\",\n  \"recommendations\": \"Các khuyến nghị cụ thể bằng tiếng Việt\"\n}`;\n\nreturn {\n  json: {\n    prompt: prompt,\n    project_id: $node['Webhook Trigger'].json.body.project_id,\n    scenario: scenario,\n    taskData: taskData\n  }\n};"
+      },
+      "name": "Function: Build AI Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={{$env.GEMINI_API_KEY}}",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "contents",
+              "value": "=[{\"parts\":[{\"text\":\"{{$json.prompt}}\"}]}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse & Format Result\nconst response = $input.first().json;\nconst promptData = $node['Function: Build AI Prompt'].json;\n\nlet result = {\n  affected_task_ids: [],\n  total_delay_days: 0,\n  analysis: 'Không thể phân tích',\n  recommendations: 'Không có khuyến nghị'\n};\n\ntry {\n  const text = response.candidates[0].content.parts[0].text;\n  \n  // Try to extract JSON from response\n  const jsonMatch = text.match(/\\{[^]*\\}/s);\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    result = {\n      affected_task_ids: parsed.affected_task_ids || [],\n      total_delay_days: parsed.total_delay_days || 0,\n      analysis: parsed.analysis || 'Không có phân tích',\n      recommendations: parsed.recommendations || 'Không có khuyến nghị'\n    };\n  }\n} catch (error) {\n  console.log('Error parsing AI response:', error);\n}\n\nreturn {\n  json: {\n    project_id: promptData.project_id,\n    scenario: promptData.scenario,\n    ...result\n  }\n};"
+      },
+      "name": "Function: Parse & Format Result",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/simulations",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "project_id",
+              "value": "={{$json.project_id}}"
+            },
+            {
+              "name": "scenario",
+              "value": "={{$json.scenario}}"
+            },
+            {
+              "name": "affected_task_ids",
+              "value": "={{JSON.stringify($json.affected_task_ids)}}"
+            },
+            {
+              "name": "total_delay_days",
+              "value": "={{$json.total_delay_days}}"
+            },
+            {
+              "name": "analysis",
+              "value": "={{$json.analysis}}"
+            },
+            {
+              "name": "recommendations",
+              "value": "={{$json.recommendations}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Save Simulation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify($json)}}",
+        "options": {}
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get Project Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Project Data": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Tasks": {
+      "main": [
+        [
+          {
+            "node": "Function: Build AI Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Build AI Prompt": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Function: Parse & Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Parse & Format Result": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Save Simulation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Save Simulation": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "4",
+  "id": "4",
+  "meta": {
+    "instanceId": "ai_deadline_n8n"
+  },
+  "tags": []
+}

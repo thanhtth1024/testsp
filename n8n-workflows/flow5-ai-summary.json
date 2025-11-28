@@ -1,0 +1,222 @@
+{
+  "name": "Flow 5 - Mini AI Summary",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "name": "Cron Trigger (Every 2 minutes)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/forecasts/latest",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "HTTP: Get Forecast Logs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/tasks?status=in_progress",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "HTTP: Get Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build Summary Prompt\nconst forecasts = $node['HTTP: Get Forecast Logs'].json.forecasts || [];\nconst tasks = $input.first().json.tasks || [];\n\nconst highRiskForecasts = forecasts.filter(f => \n  f.risk_level === 'high' || f.risk_level === 'critical'\n);\n\nconst inProgressTasks = tasks.filter(t => t.status === 'in_progress');\nconst doneTasks = tasks.filter(t => t.status === 'done');\n\nconst prompt = `Tạo báo cáo tóm tắt ngắn gọn (3-5 câu) bằng tiếng Việt về tình hình dự án:\n\nDự đoán rủi ro: ${forecasts.length} tasks được phân tích\nTasks đang thực hiện: ${inProgressTasks.length} tasks\n\nChi tiết:\n- Tasks có rủi ro cao: ${highRiskForecasts.length}\n- Tasks đang thực hiện: ${inProgressTasks.length}\n- Tasks hoàn thành: ${doneTasks.length}\n- Tổng tasks: ${tasks.length}\n\nFormat: Văn bản súc tích, dễ hiểu, highlight điểm quan trọng. Sử dụng emoji nếu phù hợp.`;\n\nreturn {\n  json: {\n    prompt: prompt,\n    stats: {\n      total_forecasts: forecasts.length,\n      high_risk_count: highRiskForecasts.length,\n      in_progress_count: inProgressTasks.length,\n      done_count: doneTasks.length,\n      total_tasks: tasks.length\n    }\n  }\n};"
+      },
+      "name": "Function: Build Summary Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={{$env.GEMINI_API_KEY}}",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "contents",
+              "value": "=[{\"parts\":[{\"text\":\"{{$json.prompt}}\"}]}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse Summary\nconst response = $input.first().json;\nlet summary = 'Không thể tạo báo cáo tóm tắt';\n\ntry {\n  const text = response.candidates[0].content.parts[0].text;\n  summary = text.trim();\n} catch (error) {\n  console.log('Error parsing AI response:', error);\n}\n\nconst stats = $node['Function: Build Summary Prompt'].json.stats;\n\nreturn {\n  json: {\n    summary: summary,\n    stats: stats,\n    generated_at: new Date().toISOString()\n  }\n};"
+      },
+      "name": "Function: Parse Summary",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.EMAIL_FROM}}",
+        "toEmail": "={{$env.ADMIN_EMAIL}}",
+        "subject": "📊 Báo cáo tóm tắt hệ thống AI Deadline",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }\n    .content { background: #f9f9f9; padding: 30px; }\n    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0; }\n    .stat-card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }\n    .stat-value { font-size: 32px; font-weight: bold; color: #667eea; }\n    .stat-label { font-size: 14px; color: #666; margin-top: 5px; }\n    .summary-box { background: white; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 4px solid #667eea; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; border-radius: 0 0 10px 10px; background: #f9f9f9; }\n  </style>\n</head>\n<body>\n  <div class='container'>\n    <div class='header'>\n      <h1>📊 Báo cáo Tóm tắt Hệ thống</h1>\n      <p>AI Deadline Forecasting Agent</p>\n    </div>\n    <div class='content'>\n      <h2>Thống kê Tổng quan</h2>\n      <div class='stats'>\n        <div class='stat-card'>\n          <div class='stat-value'>{{$json.stats.total_tasks}}</div>\n          <div class='stat-label'>Tổng Tasks</div>\n        </div>\n        <div class='stat-card'>\n          <div class='stat-value'>{{$json.stats.in_progress_count}}</div>\n          <div class='stat-label'>Đang thực hiện</div>\n        </div>\n        <div class='stat-card'>\n          <div class='stat-value'>{{$json.stats.done_count}}</div>\n          <div class='stat-label'>Hoàn thành</div>\n        </div>\n        <div class='stat-card'>\n          <div class='stat-value' style='color: #f56565;'>{{$json.stats.high_risk_count}}</div>\n          <div class='stat-label'>Rủi ro cao</div>\n        </div>\n      </div>\n      \n      <div class='summary-box'>\n        <h3>🤖 Phân tích từ AI</h3>\n        <p style='white-space: pre-wrap;'>{{$json.summary}}</p>\n      </div>\n      \n      <p style='margin-top: 20px; color: #666; font-size: 12px;'>\n        Báo cáo được tạo tự động vào: {{$json.generated_at}}\n      </p>\n    </div>\n    <div class='footer'>\n      <p>© 2024 AI Deadline Forecasting Agent</p>\n      <p>Email này được gửi tự động từ hệ thống n8n workflow</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "Send Email: Weekly Summary",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1560, 300],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/webhooks/n8n/automation-log",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "workflow_name",
+              "value": "Mini AI Summary"
+            },
+            {
+              "name": "status",
+              "value": "success"
+            },
+            {
+              "name": "input_data",
+              "value": "={{JSON.stringify($json.stats)}}"
+            },
+            {
+              "name": "output_data",
+              "value": "={{JSON.stringify({summary: $json.summary})}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Log to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "Cron Trigger (Every 2 minutes)": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get Forecast Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Forecast Logs": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Get Tasks": {
+      "main": [
+        [
+          {
+            "node": "Function: Build Summary Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Build Summary Prompt": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Function: Parse Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Parse Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Email: Weekly Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email: Weekly Summary": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Log to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "5",
+  "id": "5",
+  "meta": {
+    "instanceId": "ai_deadline_n8n"
+  },
+  "tags": []
+}

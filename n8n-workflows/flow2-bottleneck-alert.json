@@ -1,0 +1,248 @@
+{
+  "name": "Flow 2 - Bottleneck Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "name": "Cron Trigger (Every 2 minutes)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/tasks?status=in_progress",
+        "authentication": "none",
+        "options": {}
+      },
+      "name": "HTTP: Get In Progress Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Filter stale tasks (no progress update in last 2 minutes)\nconst tasks = $input.all();\nconst staleTasks = [];\nconst now = new Date();\nconst twoMinutesAgo = new Date(now - 2 * 60 * 1000);\n\nfor (const task of tasks) {\n  const t = task.json;\n  \n  // Check if last_progress_update is older than 2 minutes\n  if (t.last_progress_update) {\n    const lastUpdate = new Date(t.last_progress_update);\n    if (lastUpdate < twoMinutesAgo) {\n      staleTasks.push({\n        id: t.id,\n        name: t.name,\n        progress: t.progress || 0,\n        deadline: t.deadline,\n        status: t.status,\n        priority: t.priority,\n        last_progress_update: t.last_progress_update\n      });\n    }\n  } else {\n    // If no last_progress_update, consider it stale\n    staleTasks.push({\n      id: t.id,\n      name: t.name,\n      progress: t.progress || 0,\n      deadline: t.deadline,\n      status: t.status,\n      priority: t.priority,\n      last_progress_update: 'Never'\n    });\n  }\n}\n\nif (staleTasks.length === 0) {\n  return [];\n}\n\nreturn {\n  json: {\n    staleTasks: staleTasks,\n    count: staleTasks.length\n  }\n};"
+      },
+      "name": "Function: Filter Stale Tasks",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.count}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "IF: Has Stale Tasks",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare Gemini prompt for bottleneck analysis\nconst staleTasks = $json.staleTasks;\n\nconst prompt = `Các task sau không được cập nhật tiến độ trong thời gian dài (>2 phút):\n\n${JSON.stringify(staleTasks, null, 2)}\n\nPhân tích bằng tiếng Việt:\n1. Nguyên nhân có thể gây bottleneck\n2. Tác động đến dự án\n3. Giải pháp đề xuất (3-5 điểm cụ thể)\n\nTrả lời ngắn gọn, súc tích, dễ hiểu.`;\n\nreturn {\n  json: {\n    prompt: prompt,\n    staleTasks: staleTasks\n  }\n};"
+      },
+      "name": "Function: Prepare Gemini Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={{$env.GEMINI_API_KEY}}",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "contents",
+              "value": "=[{\"parts\":[{\"text\":\"{{$json.prompt}}\"}]}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse AI analysis\nconst response = $input.first().json;\nlet analysis = 'Không thể phân tích bottleneck';\n\ntry {\n  const text = response.candidates[0].content.parts[0].text;\n  analysis = text;\n} catch (error) {\n  console.log('Error parsing AI response:', error);\n}\n\nreturn {\n  json: {\n    analysis: analysis,\n    staleTasks: $node['Function: Prepare Gemini Prompt'].json.staleTasks\n  }\n};"
+      },
+      "name": "Function: Parse AI Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/webhooks/n8n/automation-log",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "workflow_name",
+              "value": "Bottleneck Alert"
+            },
+            {
+              "name": "status",
+              "value": "success"
+            },
+            {
+              "name": "input_data",
+              "value": "={{JSON.stringify($json.staleTasks)}}"
+            },
+            {
+              "name": "output_data",
+              "value": "={{JSON.stringify({analysis: $json.analysis})}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Log to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.EMAIL_FROM}}",
+        "toEmail": "={{$env.ADMIN_EMAIL}}",
+        "subject": "🚨 Phát hiện bottleneck - Tasks không được cập nhật",
+        "emailType": "html",
+        "message": "=<h2>Cảnh báo Bottleneck</h2>\n<p>Phát hiện <strong>{{$json.staleTasks.length}} tasks</strong> không được cập nhật tiến độ trong 2 phút qua.</p>\n<br>\n<h3>Danh sách tasks:</h3>\n<ul>\n{{#each $json.staleTasks}}\n  <li>Task #{{this.id}}: {{this.name}} (Progress: {{this.progress}}%)</li>\n{{/each}}\n</ul>\n<br>\n<h3>Phân tích AI:</h3>\n<div style='background:#f5f5f5;padding:15px;border-radius:5px;'>\n{{$json.analysis}}\n</div>",
+        "options": {}
+      },
+      "name": "Send Email: Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [2000, 200],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron Trigger (Every 2 minutes)": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Get In Progress Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Get In Progress Tasks": {
+      "main": [
+        [
+          {
+            "node": "Function: Filter Stale Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Filter Stale Tasks": {
+      "main": [
+        [
+          {
+            "node": "IF: Has Stale Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF: Has Stale Tasks": {
+      "main": [
+        [
+          {
+            "node": "Function: Prepare Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Prepare Gemini Prompt": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Function: Parse AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Function: Parse AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Log to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Log to Backend": {
+      "main": [
+        [
+          {
+            "node": "Send Email: Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "2",
+  "id": "2",
+  "meta": {
+    "instanceId": "ai_deadline_n8n"
+  },
+  "tags": []
+}

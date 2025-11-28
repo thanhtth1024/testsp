@@ -1,0 +1,157 @@
+{
+  "name": "Flow 3 - User Registration Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "n8n/new-user",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "new-user-webhook"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.EMAIL_FROM}}",
+        "toEmail": "={{$json.body.email}}",
+        "subject": "Chào mừng đến với AI Deadline! 🎉",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }\n    .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }\n    .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin-top: 20px; }\n    .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class='container'>\n    <div class='header'>\n      <h1>🎉 Chào mừng đến với AI Deadline!</h1>\n    </div>\n    <div class='content'>\n      <h2>Xin chào {{$json.body.full_name}}!</h2>\n      <p>Chúc mừng bạn đã đăng ký thành công tài khoản trên hệ thống <strong>AI Deadline Forecasting Agent</strong>.</p>\n      <p>Chúng tôi đã tự động tạo sẵn <strong>1 dự án mẫu</strong> để bạn khám phá các tính năng của hệ thống:</p>\n      <ul>\n        <li>✅ Dashboard trực quan với biểu đồ thống kê</li>\n        <li>🤖 Dự đoán nguy cơ trễ deadline bằng AI</li>\n        <li>📊 Quản lý dự án và tasks hiệu quả</li>\n        <li>🔮 Mô phỏng kịch bản \"What-if\"</li>\n        <li>⚙️ Tự động hóa với n8n workflows</li>\n      </ul>\n      <p>Hãy bắt đầu trải nghiệm ngay:</p>\n      <a href='http://localhost:5173/dashboard' class='button'>Truy cập Dashboard</a>\n      <p style='margin-top: 20px;'><strong>Thông tin đăng nhập:</strong></p>\n      <ul>\n        <li>Tên đăng nhập: <strong>{{$json.body.username}}</strong></li>\n        <li>Email: <strong>{{$json.body.email}}</strong></li>\n      </ul>\n    </div>\n    <div class='footer'>\n      <p>© 2024 AI Deadline Forecasting Agent. All rights reserved.</p>\n      <p>Nếu bạn cần hỗ trợ, vui lòng liên hệ: admin@ai-deadline.io.vn</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/projects/demo",
+        "authentication": "headerAuth",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.body.token}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Create Demo Project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/webhooks/n8n/automation-log",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "workflow_name",
+              "value": "User Registration Automation"
+            },
+            {
+              "name": "status",
+              "value": "success"
+            },
+            {
+              "name": "input_data",
+              "value": "={{JSON.stringify({user_id: $node['Webhook Trigger'].json.body.user_id, email: $node['Webhook Trigger'].json.body.email})}}"
+            },
+            {
+              "name": "output_data",
+              "value": "={{JSON.stringify({email_sent: true, demo_project_created: true, project_id: $json.id})}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Log Automation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({success: true, message: 'User setup completed', demo_project_id: $json.id})}}",
+        "options": {}
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome Email": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Create Demo Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Create Demo Project": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Log Automation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Log Automation": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "3",
+  "id": "3",
+  "meta": {
+    "instanceId": "ai_deadline_n8n"
+  },
+  "tags": []
+}

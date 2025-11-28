@@ -1,0 +1,125 @@
+{
+  "name": "Flow 6 - CI/CD Deployment Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "n8n/deploy-success",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "deploy-success-webhook"
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/webhooks/n8n/automation-log",
+        "authentication": "none",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "workflow_name",
+              "value": "CI/CD Deployment"
+            },
+            {
+              "name": "status",
+              "value": "={{$json.body.status === 'success' ? 'success' : 'failed'}}"
+            },
+            {
+              "name": "input_data",
+              "value": "={{JSON.stringify({service: $json.body.service, commit_sha: $json.body.commit_sha})}}"
+            },
+            {
+              "name": "output_data",
+              "value": "={{JSON.stringify({deployed_at: $json.body.deployed_at})}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "HTTP: Log Deployment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.EMAIL_FROM}}",
+        "toEmail": "={{$env.ADMIN_EMAIL}}",
+        "subject": "={{$json.body.status === 'success' ? '✅ Deploy thành công' : '❌ Deploy thất bại'}}: {{$node['Webhook Trigger'].json.body.service}}",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { \n      background: {{$node['Webhook Trigger'].json.body.status === 'success' ? 'linear-gradient(135deg, #48bb78 0%, #38a169 100%)' : 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)'}}; \n      color: white; \n      padding: 30px; \n      text-align: center; \n      border-radius: 10px 10px 0 0; \n    }\n    .content { background: #f9f9f9; padding: 30px; }\n    .info-box { background: white; padding: 15px; border-radius: 8px; margin: 10px 0; }\n    .info-label { font-weight: bold; color: #666; display: inline-block; width: 150px; }\n    .info-value { color: #333; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; border-radius: 0 0 10px 10px; background: #f9f9f9; }\n  </style>\n</head>\n<body>\n  <div class='container'>\n    <div class='header'>\n      <h1>{{$node['Webhook Trigger'].json.body.status === 'success' ? '✅' : '❌'}} Thông báo Deployment</h1>\n      <p>{{$node['Webhook Trigger'].json.body.service}}</p>\n    </div>\n    <div class='content'>\n      <h2>Chi tiết Deployment</h2>\n      \n      <div class='info-box'>\n        <span class='info-label'>Service:</span>\n        <span class='info-value'>{{$node['Webhook Trigger'].json.body.service}}</span>\n      </div>\n      \n      <div class='info-box'>\n        <span class='info-label'>Status:</span>\n        <span class='info-value' style='color: {{$node['Webhook Trigger'].json.body.status === 'success' ? '#48bb78' : '#f56565'}};'>\n          <strong>{{$node['Webhook Trigger'].json.body.status}}</strong>\n        </span>\n      </div>\n      \n      <div class='info-box'>\n        <span class='info-label'>Commit SHA:</span>\n        <span class='info-value'><code>{{$node['Webhook Trigger'].json.body.commit_sha}}</code></span>\n      </div>\n      \n      <div class='info-box'>\n        <span class='info-label'>Deployed At:</span>\n        <span class='info-value'>{{$node['Webhook Trigger'].json.body.deployed_at}}</span>\n      </div>\n      \n      {{#if $node['Webhook Trigger'].json.body.branch}}\n      <div class='info-box'>\n        <span class='info-label'>Branch:</span>\n        <span class='info-value'>{{$node['Webhook Trigger'].json.body.branch}}</span>\n      </div>\n      {{/if}}\n      \n      <p style='margin-top: 20px; padding: 15px; background: {{$node['Webhook Trigger'].json.body.status === 'success' ? '#c6f6d5' : '#fed7d7'}}; border-radius: 5px;'>\n        {{$node['Webhook Trigger'].json.body.status === 'success' ? '🎉 Deployment hoàn tất thành công! Hệ thống đã được cập nhật lên phiên bản mới.' : '⚠️ Deployment thất bại. Vui lòng kiểm tra logs để biết thêm chi tiết.'}}\n      </p>\n    </div>\n    <div class='footer'>\n      <p>© 2024 AI Deadline Forecasting Agent</p>\n      <p>Thông báo tự động từ GitHub Actions + n8n</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "name": "Send Email: Deployment Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{JSON.stringify({success: true, message: 'Deployment notification sent'})}}",
+        "options": {}
+      },
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Log Deployment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Log Deployment": {
+      "main": [
+        [
+          {
+            "node": "Send Email: Deployment Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email: Deployment Alert": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "6",
+  "id": "6",
+  "meta": {
+    "instanceId": "ai_deadline_n8n"
+  },
+  "tags": []
+}
